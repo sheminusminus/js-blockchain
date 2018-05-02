@@ -1,13 +1,13 @@
 {
-  "name": "blockchain",
+  "name": "jsblockchain",
   "version": "1.0.0",
-  "description": "",
+  "description": "a very simple javascript blockchain",
   "main": "blockchain.js",
   "scripts": {
     "start": "babel-node index.js"
   },
-  "author": "",
-  "license": "ISC",
+  "author": "Emily Kolar <emkolar@gmail.com>",
+  "license": "MIT",
   "dependencies": {
     "axios": "^0.18.0",
     "babel-preset-env": "^1.6.1",
