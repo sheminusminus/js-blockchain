@@ -2,7 +2,7 @@ import express from 'express';
 import bodyParser from 'body-parser';
 import uuid from 'uuid4';
 
-import Blockchain from './blockchain-1';
+import Blockchain from './blockchain';
 
 const blockChain = new Blockchain();
 const nodeId = uuid().toString().replace('-', '');

@@ -1,4 +1,22 @@
 import { sha256 } from 'js-sha256';
+import parseUrl from 'url-parse';
+import axios from 'axios';
+
+function forgeBlock(index, data, proof, previousHash) {
+  return {
+    index,
+    timestamp: Date.now(),
+    data,
+    proof,
+    previousHash,
+  };
+}
+
+function blockString(block) {
+  const dict = {};
+  Object.keys(block).sort().forEach(key => dict[key] = block[key]);
+  return JSON.stringify(dict).toString();
+}
 
 function getHashHex(string) {
   let hash = sha256.create();
@@ -6,71 +24,119 @@ function getHashHex(string) {
   return hash.hex();
 }
 
-class Block {
-  constructor(timestamp, data) {
-    this.index = 0;
-    this.timestamp = timestamp;
-    this.data = data;
-    this.previousHash = "0";
-    this.hash = this.calculateHash();
-    this.nonce = 0;
-  }
-
-  calculateHash() {
-    const str =
-      `${this.index}${this.previousHash}${this.timestamp}${this.data}${this.nonce}`
-      .toString();
-    return getHashHex(str);
-  }
-
-  mineBlock(difficulty) {
-
-  }
-}
-
-class Blockchain{
+class Blockchain {
   constructor() {
-    this.chain = [this.createGenesis()];
+    this.chain = [];
+    this.currentDataTransactions = [];
+    this.nodes = new Set();
+
+    this.newBlock(100, 1);
   }
 
-  createGenesis() {
-    const date = (new Date()).toLocaleDateString();
-    return new Block(0, date, 'Genesis Block', '0');
-  }
+  static validChain(chain) {
+    let last = chain[0];
+    let currentIndex = 1;
 
-  latestBlock() {
-    return this.chain[this.chain.length - 1];
-  }
+    while (currentIndex < chain.length) {
+      const block = chain[currentIndex];
+      if (block.previousHash !== Blockchain.hash(last)) return false;
 
-  addBlock(newBlock){
-    newBlock.previousHash = this.latestBlock().hash;
-    newBlock.hash = newBlock.calculateHash();
-    this.chain.push(newBlock);
-  }
+      const isValidProof = Blockchain.validProof(last.proof, block.proof);
+      if (!isValidProof) return false;
 
-  checkValid() {
-    for (let i = 1; i < this.chain.length; i++) {
-      const currentBlock = this.chain[i];
-      const previousBlock = this.chain[i - 1];
-
-      if (currentBlock.hash !== currentBlock.calculateHash()) {
-        return false;
-      }
-
-      if (currentBlock.previousHash !== previousBlock.hash) {
-        return false;
-      }
+      last = block;
+      currentIndex += 1;
     }
 
     return true;
   }
+
+  async resolveConflicts() {
+    let newChain = null;
+    let maxLen = this.chain.length;
+
+    const neighbors = Array.from(this.nodes);
+
+    const responses = await Promise.all(neighbors.map(async node => {
+      const resp = await axios.get(`http://${node}/chain`);
+      const { length, chain } = resp.data;
+      return { length, chain };
+    }));
+
+    responses.forEach(resp => {
+      if (resp.length > maxLen && Blockchain.validChain(resp.chain)) {
+        newChain = resp.chain;
+        maxLen = resp.length;
+      }
+    });
+
+    if (newChain) {
+      this.chain = newChain;
+      return true;
+    }
+
+    return false;
+  }
+
+  registerNode(address) {
+    const url = parseUrl(address);
+    this.nodes.add(url.host);
+  }
+
+  static validProof(lastProof, proof) {
+    const guess = `${lastProof}${proof}`.toString();
+    const guessHash = getHashHex(guess);
+
+    return guessHash.substring(0, 4) === '0000';
+  }
+
+  /*
+   * Proof of Work:
+   * Find a number p' such that hash(pp') contains leading 4 zeroes, where p is
+   * the previous proof, and p' is the new proof
+  */
+  static proofOfWork(lastProof) {
+    let proof = 0;
+
+    while (!Blockchain.validProof(lastProof, proof)) {
+      proof += 1;
+    }
+
+    return proof;
+  }
+
+  newBlock(proof, previousHash) {
+    const block = forgeBlock(
+      this.chain.length + 1,
+      this.currentDataTransactions,
+      proof,
+      previousHash || Blockchain.hash(this.lastBlock),
+    );
+
+    this.chain.push(block);
+    this.currentDataTransactions = [];
+
+    return block;
+  }
+
+  newDataTransaction(sender, recipient, data) {
+    this.currentDataTransactions.push({
+      sender,
+      recipient,
+      data,
+    });
+
+    return this.lastBlock.index + 1;
+  }
+
+  static hash(block) {
+    const str = blockString(block);
+    return getHashHex(str);
+  }
+
+  get lastBlock() {
+    return this.chain[this.chain.length - 1];
+  }
 }
 
-let chain = new Blockchain();
-chain.addBlock(new Block("12/25/2017", {amount: 5}));
-chain.addBlock(new Block("12/26/2017", {amount: 10}));
-
-console.log(JSON.stringify(chain, null, 4));
-console.log("Is blockchain valid? " + chain.checkValid());
-
-
+export default Blockchain;
